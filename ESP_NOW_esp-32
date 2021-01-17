@@ -1,0 +1,210 @@
+#include <esp_now.h>
+#include <WiFi.h>
+
+#include <Wire.h>
+//#include <Adafruit_Sensor.h>
+//#include <Adafruit_BME280.h>
+
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define PotPin 34
+#define RLed 2
+#define GLed 18
+#define BLed 4
+
+#define SCREEN_WIDTH 128  // OLED display width, in pixels
+#define SCREEN_HEIGHT 64  // OLED display height, in pixels
+
+// Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+//Adafruit_BME280 bme;
+
+// REPLACE WITH THE MAC Address of your receiver 
+//uint8_t broadcastAddress[] = {0x7C, 0x9E, 0xBD, 0xF6, 0x0C, 0x18};
+uint8_t broadcastAddress[] = {0x30, 0xAE, 0xA4, 0x9A, 0xB8, 0x1C};
+// Define variables to store BME280 readings to be sent
+//float temperature;
+//float humidity;
+int Potent;
+// Define variables to store incoming readings
+int incomingPIR;
+
+// Variable to store if sending data was successful
+String success;
+
+//Structure example to send data
+//Must match the receiver structure
+typedef struct struct_message {
+    //float temp;
+    //float hum;
+    int PIR;
+    int Pot;
+} struct_message;
+
+// Create a struct_message to hold sensor readings
+//struct_message DHT11Readings;
+struct_message PotReadings;
+
+// Create a struct_message to hold incoming sensor readings
+struct_message incomingReadings;
+
+// Callback when data is sent
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+  Serial.print("\r\nLast Packet Send Status:\t");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+  if (status ==0){
+    success = "Delivery Success :)";
+  }
+  else{
+    success = "Delivery Fail :(";
+  }
+}
+
+// Callback when data is received
+void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
+  memcpy(&incomingReadings, incomingData, sizeof(incomingReadings));
+  Serial.print("Bytes received: ");
+  Serial.println(len);
+  incomingPIR = incomingReadings.PIR;
+  //incomingHum = incomingReadings.hum;
+}
+ 
+void setup() {
+  // Init Serial Monitor
+  Serial.begin(115200);
+  //dht.begin();
+  pinMode(PotPin, INPUT);
+  pinMode(RLed, OUTPUT);
+  pinMode(GLed, OUTPUT);
+  pinMode(BLed, OUTPUT);
+
+  // Init OLED display
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { 
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;);
+  }
+ 
+  // Set device as a Wi-Fi Station
+  WiFi.mode(WIFI_STA);
+
+  // Init ESP-NOW
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Error initializing ESP-NOW");
+    return;
+  }
+
+  // Once ESPNow is successfully Init, we will register for Send CB to
+  // get the status of Trasnmitted packet
+  esp_now_register_send_cb(OnDataSent);
+  
+  // Register peer
+  esp_now_peer_info_t peerInfo;
+  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+  peerInfo.channel = 0;  
+  peerInfo.encrypt = false;
+  
+  // Add peer        
+  if (esp_now_add_peer(&peerInfo) != ESP_OK){
+    Serial.println("Failed to add peer");
+    return;
+  }
+  // Register for a callback function that will be called when data is received
+  esp_now_register_recv_cb(OnDataRecv);
+}
+ 
+void loop() {
+  getReadings();
+ 
+  // Set values to send
+  //DHT11Readings.temp = temperature;
+  //DHT11Readings.hum = humidity;
+  PotReadings.Pot = Potent;
+
+  // Send message via ESP-NOW
+  esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &PotReadings, sizeof(PotReadings));
+   
+  if (result == ESP_OK) {
+    Serial.println("Sent with success");
+  }
+  else {
+    Serial.println("Error sending the data");
+  }
+  if (incomingReadings.PIR == 1) {
+    digitalWrite(RLed, HIGH);
+    digitalWrite(GLed, LOW);
+    digitalWrite(BLed, LOW);
+    updateDisplay();
+  }
+  else if (incomingReadings.PIR == 0) {
+    digitalWrite(RLed, LOW);
+    digitalWrite(GLed, HIGH);
+    digitalWrite(BLed, LOW);
+    restDisplay();
+  }
+  delay(2000);
+}
+
+void getReadings(){
+  Potent = analogRead(PotPin);
+  //humidity = dht.readHumidity();
+}
+void restDisplay(){
+  // Display Readings on OLED Display
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 0);
+  display.println("Security Cam");
+  display.setTextSize(1);
+  display.setCursor(0, 15);
+  display.print("PIR: ");
+  display.println(incomingPIR);
+  //display.cp437(true);
+  //display.write(248);
+  //display.print("F");
+  display.setCursor(0, 25);
+  display.print("No activity");
+  //display.print(incomingHum);
+  //display.print("%");
+  display.setCursor(0, 56);
+  display.print(success);
+  display.display();
+  // Display Readings in Serial Monitor
+  Serial.println("INCOMING READINGS");
+  Serial.print("PIR: ");
+  Serial.print(incomingReadings.PIR);
+  //Serial.println(" ºF");
+  //Serial.print("Humidity: ");
+  //Serial.print(incomingReadings.hum);
+  //Serial.println(" %");
+  Serial.println();
+}
+void updateDisplay(){
+  // Display Readings on OLED Display
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 0);
+  display.println("INCOMING READINGS");
+  display.setCursor(0, 15);
+  display.print("Motion detected: CAM1 ");
+  display.println(incomingPIR);
+  display.setCursor(0, 32);
+  display.println("Go to: http//192.168.1.16");
+  display.print("to view");
+  display.setCursor(0, 56);
+  display.print(success);
+  display.display();
+  
+  // Display Readings in Serial Monitor
+  Serial.println("INCOMING READINGS");
+  Serial.print("Motion detected: CAM1 ");
+  Serial.print(incomingReadings.PIR);
+  //Serial.println(" ºF");
+  //Serial.print("Humidity: ");
+  //Serial.print(incomingReadings.hum);
+ // Serial.println(" %");
+  Serial.println();
+}
